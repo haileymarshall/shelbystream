@@ -1,0 +1,29 @@
+import { Network } from "@aptos-labs/ts-sdk";
+
+function getShelbyNetwork(): Network.SHELBYNET | Network.TESTNET {
+  const net = process.env.NEXT_PUBLIC_SHELBY_NETWORK ?? "shelbynet";
+  if (net === "testnet") return Network.TESTNET;
+  return Network.SHELBYNET;
+}
+
+export async function getShelbyNodeClient(privateKey: string) {
+  const { ShelbyNodeClient } = await import("@shelby-protocol/sdk/node");
+  const { Ed25519PrivateKey, PrivateKey, PrivateKeyVariants, Account } =
+    await import("@aptos-labs/ts-sdk");
+
+  const network = getShelbyNetwork();
+
+  const client = new ShelbyNodeClient({
+    network,
+    apiKey: process.env.SHELBY_API_KEY ?? "",
+  });
+
+  const formattedKey = PrivateKey.formatPrivateKey(
+    privateKey,
+    PrivateKeyVariants.Ed25519
+  );
+  const ed25519Key = new Ed25519PrivateKey(formattedKey);
+  const account = Account.fromPrivateKey({ privateKey: ed25519Key });
+
+  return { client, account };
+}
