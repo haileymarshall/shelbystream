@@ -58,8 +58,14 @@ export async function POST(req: NextRequest) {
           "ffmpeg-static",
           process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg"
         );
-        const { existsSync } = await import("fs");
+        const { existsSync, chmodSync } = await import("fs");
         if (!existsSync(ffmpegBin)) throw new Error(`ffmpeg binary not found at ${ffmpegBin}`);
+
+        // Ensure the binary is executable — Vercel does not preserve file permissions
+        // from node_modules, so chmod is required before spawning on Linux.
+        if (process.platform !== "win32") {
+          chmodSync(ffmpegBin, 0o755);
+        }
 
         const { spawn } = await import("child_process");
         const { mapNamesToDirs } = await import("@shelby-protocol/media-prepare/node");
