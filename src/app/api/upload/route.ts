@@ -3,6 +3,7 @@ import { writeFile, readdir, readFile, mkdir, rm } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
 import { randomUUID } from "crypto";
+import { del } from "@vercel/blob";
 
 export const maxDuration = 300; // 5 minutes
 
@@ -10,16 +11,20 @@ export async function POST(req: NextRequest) {
   const videoId = randomUUID();
   const workDir = join(tmpdir(), `shelby-${videoId}`);
 
-  const formData = await req.formData();
-  const videoFile = formData.get("video") as File | null;
-  const title = (formData.get("title") as string) ?? "Untitled";
-  const description = (formData.get("description") as string) ?? "";
-  const tags = (formData.get("tags") as string) ?? "";
-  const creatorAddress = formData.get("creatorAddress") as string;
+  // The client uploads the raw video directly to Vercel Blob (no 4.5 MB limit),
+  // then sends us the blob URL + metadata as JSON.
+  const { blobUrl, title, description, tags, creatorAddress } =
+    (await req.json()) as {
+      blobUrl: string;
+      title: string;
+      description: string;
+      tags: string;
+      creatorAddress: string;
+    };
 
-  if (!videoFile || !creatorAddress) {
+  if (!blobUrl || !creatorAddress) {
     return new Response(
-      JSON.stringify({ error: "Missing video file or creator address" }),
+      JSON.stringify({ error: "Missing blob URL or creator address" }),
       { status: 400, headers: { "Content-Type": "application/json" } }
     );
   }
@@ -29,28 +34,35 @@ export async function POST(req: NextRequest) {
     async start(controller) {
       function send(stage: string, message: string, videoId?: string) {
         controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify({ stage, message, videoId })}\n\n`)
+          encoder.encode(
+            `data: ${JSON.stringify({ stage, message, videoId })}\n\n`
+          )
         );
       }
 
       try {
-        send("transcoding", "Writing input file...");
+        send("transcoding", "Downloading video from storage...");
 
-        // Write to /tmp — ephemeral per-invocation storage, writable in serverless.
-        // We clean up in the finally block. tmpdir() returns /tmp on Linux (Vercel).
         await mkdir(workDir, { recursive: true });
         const inputPath = join(workDir, "input.mp4");
         const outputDir = join(workDir, "output");
         await mkdir(outputDir, { recursive: true });
 
-        const bytes = await videoFile.arrayBuffer();
-        await writeFile(inputPath, Buffer.from(bytes));
+        // Download the raw video from Vercel Blob.
+        // Public-access blobs are fetched directly; private blobs require the token header.
+        const videoRes = await fetch(blobUrl, {
+          headers: process.env.BLOB_READ_WRITE_TOKEN
+            ? { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` }
+            : {},
+        });
+        if (!videoRes.ok) {
+          throw new Error(`Failed to download video from blob: ${videoRes.status}`);
+        }
+        const videoBytes = await videoRes.arrayBuffer();
+        await writeFile(inputPath, Buffer.from(videoBytes));
 
         send("transcoding", "Transcoding to HLS...");
 
-        // Transcode with media-prepare
-        // Construct the ffmpeg-static path from process.cwd() to avoid Next.js bundler
-        // mangling __dirname inside ffmpeg-static into a virtual \ROOT\ path.
         const { join: pathJoin } = await import("path");
         const ffmpegBin = pathJoin(
           process.cwd(),
@@ -59,43 +71,52 @@ export async function POST(req: NextRequest) {
           process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg"
         );
         const { existsSync, chmodSync } = await import("fs");
-        if (!existsSync(ffmpegBin)) throw new Error(`ffmpeg binary not found at ${ffmpegBin}`);
+        if (!existsSync(ffmpegBin))
+          throw new Error(`ffmpeg binary not found at ${ffmpegBin}`);
 
-        // Ensure the binary is executable — Vercel does not preserve file permissions
-        // from node_modules, so chmod is required before spawning on Linux.
+        // Ensure the binary is executable — Vercel does not preserve file permissions.
         if (process.platform !== "win32") {
           chmodSync(ffmpegBin, 0o755);
         }
 
         const { spawn } = await import("child_process");
-        const { mapNamesToDirs } = await import("@shelby-protocol/media-prepare/node");
+        const { mapNamesToDirs } = await import(
+          "@shelby-protocol/media-prepare/node"
+        );
         const { hlsCmaf } = await import("@shelby-protocol/media-prepare/core");
 
-        const builder = hlsCmaf.planHlsCmaf()
+        const builder = hlsCmaf
+          .planHlsCmaf()
           .input(inputPath)
           .outputDir(outputDir)
           .withLadder(hlsCmaf.presets.vodHd_1080p)
           .withVideoEncoder(hlsCmaf.x264({ preset: "fast" }))
-          .withAudio(hlsCmaf.aac(), { language: "en", bitrateBps: 128_000, default: true })
+          .withAudio(hlsCmaf.aac(), {
+            language: "en",
+            bitrateBps: 128_000,
+            default: true,
+          })
           .withSegmentsFixed(6)
           .hlsCmaf();
 
         const { args, variantNames } = builder.render.ffmpegArgs();
 
-        // Pre-create output subdirectories that FFmpeg expects
         const dirs = mapNamesToDirs(outputDir, variantNames);
         await Promise.all(dirs.map((d) => mkdir(d, { recursive: true })));
 
-        // Spawn ffmpeg directly using the absolute path from ffmpeg-static
         await new Promise<void>((resolve, reject) => {
-          const proc = spawn(ffmpegBin, args, { stdio: "ignore", cwd: outputDir });
+          const proc = spawn(ffmpegBin, args, {
+            stdio: "ignore",
+            cwd: outputDir,
+          });
           proc.on("error", reject);
           proc.on("close", (code) =>
-            code === 0 ? resolve() : reject(new Error(`ffmpeg exited with code ${code}`))
+            code === 0
+              ? resolve()
+              : reject(new Error(`ffmpeg exited with code ${code}`))
           );
         });
 
-        // Extract a thumbnail frame at 1 second
         const thumbnailPath = join(outputDir, "thumbnail.jpg");
         await new Promise<void>((resolve, reject) => {
           const proc = spawn(
@@ -105,16 +126,16 @@ export async function POST(req: NextRequest) {
           );
           proc.on("error", reject);
           proc.on("close", (code) =>
-            code === 0 ? resolve() : reject(new Error(`thumbnail extraction failed with code ${code}`))
+            code === 0
+              ? resolve()
+              : reject(new Error(`thumbnail extraction failed with code ${code}`))
           );
         });
 
         send("encoding", "Generating commitments...");
 
-        // Get all output files
         const allFiles = await collectFiles(outputDir);
 
-        // Init Shelby node client
         const privateKey = process.env.APTOS_PRIVATE_KEY;
         if (!privateKey) throw new Error("APTOS_PRIVATE_KEY not configured");
 
@@ -125,7 +146,6 @@ export async function POST(req: NextRequest) {
 
         send("registering", "Registering on Aptos...");
 
-        // Upload all HLS files to Shelby (batch for efficiency)
         const blobs = await Promise.all(
           allFiles.map(async (filePath) => {
             const relativePath = filePath
@@ -146,11 +166,13 @@ export async function POST(req: NextRequest) {
           expirationMicros,
         });
 
-        // Upload metadata.json
         const metadataBlob = {
-          title,
-          description,
-          tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
+          title: title ?? "Untitled",
+          description: description ?? "",
+          tags: (tags ?? "")
+            .split(",")
+            .map((t: string) => t.trim())
+            .filter(Boolean),
           creator: creatorAddress,
           uploadedAt: Math.floor(Date.now() / 1000),
           duration: 0,
@@ -173,7 +195,10 @@ export async function POST(req: NextRequest) {
         const message = err instanceof Error ? err.message : "Upload failed";
         send("error", message);
       } finally {
+        // Clean up /tmp workspace
         await rm(workDir, { recursive: true, force: true }).catch(() => {});
+        // Delete the raw video from Vercel Blob — it's no longer needed
+        await del(blobUrl).catch(() => {});
         controller.close();
       }
     },

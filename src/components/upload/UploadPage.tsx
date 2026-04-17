@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
+import { upload } from "@vercel/blob/client";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import { useRouter } from "next/navigation";
 import { useDropzone } from "react-dropzone";
@@ -170,20 +171,34 @@ export default function UploadPage() {
 
       toast.success("Upload authorized!");
 
-      // Step 2: Proceed with server-side upload
-      setProgress({ stage: "transcoding", progress: 20, message: "Starting upload..." });
+      // Step 2: Upload video directly to Vercel Blob (bypasses the 4.5 MB function limit).
+      setProgress({ stage: "transcoding", progress: 10, message: "Uploading video to storage..." });
 
-      const formData = new FormData();
-      formData.append("video", file);
-      formData.append("title", title.trim());
-      formData.append("description", description.trim());
-      formData.append("tags", tags);
-      formData.append("creatorAddress", account.address.toString());
-      formData.append("signature", signature);
+      const blob = await upload(file.name, file, {
+        access: "public",
+        handleUploadUrl: "/api/upload/token",
+        onUploadProgress: ({ percentage }) => {
+          setProgress({
+            stage: "transcoding",
+            progress: Math.round(10 + percentage * 0.1), // 10–20%
+            message: `Uploading video... ${percentage}%`,
+          });
+        },
+      });
+
+      // Step 3: Trigger server-side transcoding + Shelby upload via SSE stream.
+      setProgress({ stage: "transcoding", progress: 20, message: "Starting transcoding..." });
 
       const res = await fetch("/api/upload", {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          blobUrl: blob.url,
+          title: title.trim(),
+          description: description.trim(),
+          tags,
+          creatorAddress: account.address.toString(),
+        }),
       });
 
       if (!res.ok) {
