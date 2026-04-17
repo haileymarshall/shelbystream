@@ -1,4 +1,4 @@
-import { handleUpload, type HandleUploadBody } from "@vercel/blob/next";
+import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { NextRequest } from "next/server";
 
 // Generates a client-side upload token for Vercel Blob.
