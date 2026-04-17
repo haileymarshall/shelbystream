@@ -29,9 +29,9 @@ import { SHELBYUSD_FA_METADATA_ADDRESS } from "@/lib/constants";
 const STAGE_LABELS: Record<UploadProgress["stage"], string> = {
   idle: "Ready",
   confirming: "Waiting for wallet confirmation...",
-  transcoding: "Transcoding video...",
-  encoding: "Generating commitments...",
-  registering: "Registering on Aptos...",
+  transcoding: "Preparing video...",
+  encoding: "Extracting thumbnail...",
+  registering: "Registering on Shelby...",
   uploading: "Uploading to Shelby...",
   done: "Upload complete!",
   error: "Upload failed",
@@ -40,10 +40,10 @@ const STAGE_LABELS: Record<UploadProgress["stage"], string> = {
 const STAGE_PROGRESS: Record<UploadProgress["stage"], number> = {
   idle: 0,
   confirming: 5,
-  transcoding: 20,
-  encoding: 45,
-  registering: 65,
-  uploading: 85,
+  transcoding: 25,
+  encoding: 40,
+  uploading: 70,
+  registering: 92,
   done: 100,
   error: 0,
 };
@@ -143,7 +143,7 @@ export default function UploadPage() {
     onDrop,
     accept: { "video/*": [".mp4", ".mov", ".avi", ".mkv", ".webm"] },
     maxFiles: 1,
-    maxSize: 2 * 1024 * 1024 * 1024, // 2GB
+    maxSize: 200 * 1024 * 1024, // 200 MB (Vercel Function memory ceiling)
     disabled: progress.stage !== "idle" && progress.stage !== "error",
   });
 
@@ -159,15 +159,10 @@ export default function UploadPage() {
       });
 
       const nonce = Date.now().toString();
-      const signResult = await signMessage({
+      await signMessage({
         message: `ShelbyStream Upload Authorization\n\nTitle: ${title.trim()}\nWallet: ${account.address.toString()}\nTimestamp: ${nonce}`,
         nonce,
       });
-
-      const signature =
-        typeof signResult === "object" && signResult !== null && "signature" in signResult
-          ? String(signResult.signature)
-          : String(signResult);
 
       toast.success("Upload authorized!");
 
@@ -180,20 +175,21 @@ export default function UploadPage() {
         onUploadProgress: ({ percentage }) => {
           setProgress({
             stage: "transcoding",
-            progress: Math.round(10 + percentage * 0.1), // 10–20%
+            progress: Math.round(10 + percentage * 0.15), // 10–25%
             message: `Uploading video... ${percentage}%`,
           });
         },
       });
 
-      // Step 3: Trigger server-side transcoding + Shelby upload via SSE stream.
-      setProgress({ stage: "transcoding", progress: 20, message: "Starting transcoding..." });
+      // Step 3: Trigger server-side Shelby upload via SSE stream.
+      setProgress({ stage: "transcoding", progress: 25, message: "Preparing video..." });
 
       const res = await fetch("/api/upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           blobUrl: blob.url,
+          filename: file.name,
           title: title.trim(),
           description: description.trim(),
           tags,
@@ -344,7 +340,7 @@ export default function UploadPage() {
                 {isDragActive ? "Drop your video here" : "Drag & drop your video"}
               </p>
               <p className="text-xs text-muted-foreground">
-                MP4, MOV, AVI, MKV, WebM · Max 2GB
+                MP4, MOV, AVI, MKV, WebM · Max 200MB
               </p>
             </div>
           )}

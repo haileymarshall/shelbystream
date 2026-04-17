@@ -23,8 +23,12 @@ export default function WatchPage({ address, videoId }: WatchPageProps) {
   const [metadata, setMetadata] = useState<VideoMetadata | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const playlistUrl = `${SHELBY_RPC_ENDPOINT}/v1/blobs/${address}/videos/${videoId}/master.m3u8`;
-  const thumbnailUrl = `${SHELBY_RPC_ENDPOINT}/v1/blobs/${address}/videos/${videoId}/thumbnail.jpg`;
+  const videoUrl = metadata?.blobName
+    ? `${SHELBY_RPC_ENDPOINT}/v1/blobs/${address}/${metadata.blobName}`
+    : null;
+  const thumbnailUrl = metadata?.thumbnailBlob
+    ? `${SHELBY_RPC_ENDPOINT}/v1/blobs/${address}/${metadata.thumbnailBlob}`
+    : undefined;
 
   useEffect(() => {
     async function load() {
@@ -56,11 +60,17 @@ export default function WatchPage({ address, videoId }: WatchPageProps) {
         <div className="lg:col-span-2 space-y-4">
           {/* Player */}
           <div className="rounded-xl overflow-hidden border border-border bg-black aspect-video">
-            <ShelbyPlayer
-              src={playlistUrl}
-              poster={thumbnailUrl}
-              title={metadata?.title}
-            />
+            {videoUrl ? (
+              <ShelbyPlayer
+                src={videoUrl}
+                poster={thumbnailUrl}
+                title={metadata?.title}
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-sm text-muted-foreground">
+                {loading ? "Loading video…" : "Video not found"}
+              </div>
+            )}
           </div>
 
           {/* Video info */}

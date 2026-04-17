@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
         "video/webm",
         "video/*",
       ],
-      maximumSizeInBytes: 2 * 1024 * 1024 * 1024, // 2 GB
+      maximumSizeInBytes: 200 * 1024 * 1024, // 200 MB
     }),
     onUploadCompleted: async () => {
       // No-op — processing is triggered separately by the client.
