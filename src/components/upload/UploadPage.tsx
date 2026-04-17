@@ -208,6 +208,7 @@ export default function UploadPage() {
       const decoder = new TextDecoder();
       let buffer = "";
       let finalVideoId: string | undefined;
+      let finalCreatorAddress: string | undefined;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -224,9 +225,11 @@ export default function UploadPage() {
             stage: UploadProgress["stage"];
             message: string;
             videoId?: string;
+            creatorAddress?: string;
           };
 
           if (event.videoId) finalVideoId = event.videoId;
+          if (event.creatorAddress) finalCreatorAddress = event.creatorAddress;
 
           if (event.stage === "error") {
             throw new Error(event.message);
@@ -245,8 +248,9 @@ export default function UploadPage() {
       setProgress({ stage: "done", progress: 100, message: "Upload complete!" });
       toast.success("Video uploaded successfully!");
 
+      const redirectAddress = finalCreatorAddress ?? account.address.toString();
       setTimeout(() => {
-        router.push(`/watch/${account.address}/${finalVideoId}`);
+        router.push(`/watch/${redirectAddress}/${finalVideoId}`);
       }, 1500);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";

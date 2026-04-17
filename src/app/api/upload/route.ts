@@ -36,10 +36,14 @@ export async function POST(req: NextRequest) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
-      function send(stage: string, message: string, videoId?: string) {
+      function send(
+        stage: string,
+        message: string,
+        extra: { videoId?: string; creatorAddress?: string } = {}
+      ) {
         controller.enqueue(
           encoder.encode(
-            `data: ${JSON.stringify({ stage, message, videoId })}\n\n`
+            `data: ${JSON.stringify({ stage, message, ...extra })}\n\n`
           )
         );
       }
@@ -155,7 +159,10 @@ export async function POST(req: NextRequest) {
           expirationMicros,
         });
 
-        send("done", "Upload complete!", videoId);
+        send("done", "Upload complete!", {
+          videoId,
+          creatorAddress: account.accountAddress.toString(),
+        });
       } catch (err) {
         console.error("Upload error:", err);
         const message = err instanceof Error ? err.message : "Upload failed";
