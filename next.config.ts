@@ -1,13 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  experimental: {
-    // Include the ffmpeg-static binary in the upload API route's function bundle.
-    // Without this, Vercel's file tracer omits native binaries and the binary
-    // is not found at runtime (process.cwd()/node_modules/ffmpeg-static/ffmpeg).
-    outputFileTracingIncludes: {
-      "/api/upload": ["./node_modules/ffmpeg-static/ffmpeg"],
-    },
+  // Include the ffmpeg-static binary in the upload API route's function bundle.
+  // Without this, Vercel's file tracer omits native binaries and the binary
+  // is not found at runtime (process.cwd()/node_modules/ffmpeg-static/ffmpeg).
+  outputFileTracingIncludes: {
+    "/api/upload": ["./node_modules/ffmpeg-static/ffmpeg"],
   },
   images: {
     remotePatterns: [
